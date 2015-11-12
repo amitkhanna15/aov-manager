@@ -35,13 +35,16 @@ class AovManager(QtGui.QMainWindow):
         self.setStyleSheet('QMainWindow, QScrollArea, QWidget {background-color:#333;} \
             QListWidget { color:#fff; background-color: #333; } \
             QTreeView { color:#fff; background-color: #333; } \
+            QHeaderView::section { background-color:#505050; color: white; padding: 1px 4px;border: 1px solid #6c6c6c;}\
             QMenu { color:#fff;} \
             QMenu::item:selected{ background-color: #444; } \
             QPushButton {height:30px; color: #fff; background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1 stop:0 #555, stop:1 #333); border: 1px solid #252525;} \
             QPushButton:pressed { background-color: #222; border-style: inset; } \
             QPushButton:hover { background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1 stop:0 #545454, stop:1 #383838);} \
-            QCheckBox { color:#fff; background-color: #333; } \
+            QCheckBox QStatusBar { color:#fff; background-color: #333; } \
+            QStatusBar { color:#fff;} \
             ')
+
 
 
         self.out = '/out/'
@@ -60,7 +63,8 @@ class AovManager(QtGui.QMainWindow):
 
         # ui loader
         self.ui = loadUi(os.path.join(SCRIPT_DIRECTORY, 'ui/aov-manager.ui'), self)
-
+        
+        self.statusBar = self.ui.findChild(QtGui.QStatusBar, "statusbar")
         self.ropList = self.ui.findChild(QtGui.QListWidget, "listWidget_rop")
         #self.aovList = self.ui.findChild(QtGui.QListWidget, "listWidget_aov")
         self.aovList = self.ui.findChild(QtGui.QTreeView, "treeView_aov")
@@ -326,10 +330,11 @@ class AovManager(QtGui.QMainWindow):
         # loop through them to access desired parms
         for i in xrange(1, parmCount+1):
 
-            vexvar = node.parm('vm_variable_plane%d' % i)
-            chname = node.parm('vm_channel_plane%d' % i)
+            vexvar  = node.parm('vm_variable_plane%d' % i)
+            chname  = node.parm('vm_channel_plane%d' % i)
+            vextype = node.parm('vm_vextype_plane%d' % i)
 
-            item =  [QtGui.QStandardItem(vexvar.eval()), QtGui.QStandardItem(chname.eval()), QtGui.QStandardItem(chname.name())]
+            item =  [QtGui.QStandardItem(vexvar.eval()), QtGui.QStandardItem(chname.eval()), QtGui.QStandardItem(vextype.eval())]
             self.rootItem.appendRow(item)
 
             self.__aovList.append(vexvar.eval()) 
@@ -523,6 +528,14 @@ class AovManager(QtGui.QMainWindow):
         cRop = hou.node(self.out + curr.text())
         self.currRop = cRop
         self.populateAovTree()
+        
+
+        ps           = cRop.parmTuple('vm_samples').eval()
+        pixelSamples = str(ps[0]) + 'x' + str(ps[1])
+        noiseLevel   = cRop.parm('vm_variance').eval()
+        take         = cRop.parm('take').eval()
+
+        self.statusBar.showMessage('take: ' + take + '  |  pixel samples: ' + pixelSamples + '  |  noise level: ' + str(noiseLevel)   )
 
 
 
