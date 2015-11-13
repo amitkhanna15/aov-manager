@@ -41,8 +41,7 @@ class AovManager(QtGui.QMainWindow):
             QPushButton {height:30px; color: #fff; background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1 stop:0 #555, stop:1 #333); border: 1px solid #252525;} \
             QPushButton:pressed { background-color: #222; border-style: inset; } \
             QPushButton:hover { background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1 stop:0 #545454, stop:1 #383838);} \
-            QCheckBox QStatusBar { color:#fff; background-color: #333; } \
-            QStatusBar { color:#fff;} \
+            QCheckBox, QStatusBar { color:#fff; background-color: #333; } \
             ')
 
 
@@ -50,10 +49,11 @@ class AovManager(QtGui.QMainWindow):
         self.out = '/out/'
         self.currRop = []
         self.listOfRops = []
+        self.ropDisp = True
         self.userSettings = []
         self.__aovList = []
         self.copiedImagePlanes = []
-        self. ipDict = collections.OrderedDict()
+        self.ipDict = collections.OrderedDict()
         self.ipData = []
         self.imagePlaneParms = ['vm_disable_plane', 'vm_variable_plane', 'vm_vextype_plane', 'vm_channel_plane',
         'vm_usefile_plane','vm_filename_plane', 'vm_quantize_plane', 'vm_sfilter_plane', 'vm_pfilter_plane',
@@ -66,12 +66,11 @@ class AovManager(QtGui.QMainWindow):
         
         self.statusBar = self.ui.findChild(QtGui.QStatusBar, "statusbar")
         self.ropList = self.ui.findChild(QtGui.QListWidget, "listWidget_rop")
-        #self.aovList = self.ui.findChild(QtGui.QListWidget, "listWidget_aov")
         self.aovList = self.ui.findChild(QtGui.QTreeView, "treeView_aov")
 
         self.renderBtn = self.ui.findChild(QtGui.QPushButton, "pushButton")
         self.halfResCheck = self.ui.findChild(QtGui.QCheckBox, "checkBox")
-        self.dispCheck = self.ui.findChild(QtGui.QCheckBox, "checkBox_dd")
+        self.tglDispChkBx = self.ui.findChild(QtGui.QCheckBox, "checkBox_dd")
 
         self.ropList.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.ropList.customContextMenuRequested.connect(self.ropContextMenu)
@@ -79,15 +78,14 @@ class AovManager(QtGui.QMainWindow):
         self.aovList.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.aovList.customContextMenuRequested.connect(self.aovContextMenu)
         self.model = QtGui.QStandardItemModel()
-        self.model.setHorizontalHeaderLabels(['VEX Variable', 'Channel Name', 'ID'])
+        self.model.setHorizontalHeaderLabels(['VEX Variable', 'Channel Name', 'VEX Type'])
         self.rootItem = self.model.invisibleRootItem()
 
         self.populateRopList()
         self.ropList.currentItemChanged.connect(self.getCurrentRop)
         self.ropList.doubleClicked.connect(self.selectRop)
         self.renderBtn.clicked.connect(self.render)
-        self.dispCheck.clicked.connect(self.addRemoveRopDisplacement)
-
+        self.tglDispChkBx.clicked.connect(self.toggleDisplacements)
         self.aovList.clicked.connect(self.aovListClicked)
 
         
@@ -186,33 +184,22 @@ class AovManager(QtGui.QMainWindow):
         halfRes = self.halfResCheck.isChecked()
 
         if(halfRes):
-            print('\n*******RENDEINRG HALF\n')
-            print('\n','-------USER SETTINGS 1/2-------','\n',self.userSettings)
+            #print('\n*******RENDEINRG HALF\n')
+            #print('\n','-------USER SETTINGS 1/2-------','\n',self.userSettings)
 
             rop.parm('override_camerares').set(1)
             rop.parm('res_fraction').set('.5')
-            print(rop.parm('res_fraction').eval())
+            #print(rop.parm('res_fraction').eval())
         else:
-            print('\nRENDEINRG ORIGINAL\n')
-            print('\n','-------USER SETTINGS FULL-------','\n',self.userSettings)
+            #print('\nRENDEINRG ORIGINAL\n')
+            #print('\n','-------USER SETTINGS FULL-------','\n',self.userSettings)
 
             oc = self.getOrigParmValue('override_camerares')
             rf = str(self.getOrigParmValue('res_fraction'))
-            print('\nPARM VALUE OC-RF:', oc, rf)
+            #print('\nPARM VALUE OC-RF:', oc, rf)
             rop.parm('override_camerares').set(oc)
             rop.parm('res_fraction').set(rf)
-            print(rop.parm('res_fraction').eval())
-
-        # THIS IS WORKING BUT HAVE TO FIX THE HOUDINI
-        # BUG WHICH RESETS LIGHT EXPORT & RESOLUTION VALUES
-
-        # check displacements  
-        # noDisp = self.dispCheck.isChecked()
-        # if(noDisp):
-        #     self.manageDisplacements(False)
-        # else:
-        #     self.manageDisplacements(True)
-
+            #print(rop.parm('res_fraction').eval())
 
         # render
         rop.parm('renderpreview').pressButton()
@@ -221,26 +208,48 @@ class AovManager(QtGui.QMainWindow):
 
 
     '''
-        Add displacement parm to selected rop.
+        Add dicing parm to selected rop and 
+        toggle the displacements through dicing on-off.
     '''
-    def manageDisplacements(self, disp=True):
+    def toggleDisplacements(self):
 
-        rop = self.currRop
-        p = rop.parm('vm_dicingquality')
+        disp = not self.ropDisp
 
-        # if param already exist on the rop, en/dis it
+        node = self.currRop
+        p = node.parm('vm_dicingquality')
+        ipCount = node.parm('vm_numaux').eval()
+
+        # FIX HOUDINI BUG which reset lightExport values on aovs when a spare parm added
+        # get all light export settings and set them back after adding dicing parm
+        ltExportVal = []
+        for i in xrange(1, ipCount+1):
+            ltExportVal.append(node.parm('vm_lightexport%d' % i).eval())
+
+
+        # if parm already exist on the rop, en/dis it
         # else add parameter and then enable/disable it
         if(p):
-            rop.parm('vm_dicingquality').set(disp)
+            node.parm('vm_dicingquality').set(disp)
         else:
-            ptg = rop.parmTemplateGroup()
+            ptg = node.parmTemplateGroup()
 
-            hou_parm_template = hou.ToggleParmTemplate("vm_dicingquality", "Enable Displacement", default_value=disp)
+            hou_parm_template = hou.ToggleParmTemplate("vm_dicingquality", "Enable Dicing", default_value=disp)
             hou_parm_template.setJoinWithNext(True)
 
             target_folder = ("Rendering", "Dicing")
             ptg.appendToFolder(target_folder, hou_parm_template)
-            rop.setParmTemplateGroup(ptg)
+            node.setParmTemplateGroup(ptg)
+
+
+        # FIX HOUDINI BUG which reset lightExport values on aovs when a spare parm added
+        # get all light export settings and set them back after adding dicing parm
+        for i in xrange(0, ipCount-1):
+            print i, ipCount, ltExportVal[i]
+
+            ipnum = i+1
+            node.parm('vm_lightexport%d' % ipnum).set(ltExportVal[i])
+
+        self.updateDispStatus()
 
 
 
@@ -263,7 +272,7 @@ class AovManager(QtGui.QMainWindow):
 
 
     '''
-        list all scene cams in rop list context menu.
+        List all scene cams in rop list context menu.
     '''
     def ropContextMenu(self, pos):
         
@@ -287,10 +296,10 @@ class AovManager(QtGui.QMainWindow):
         
         menu = QtGui.QMenu()
 
-        actions = ['Delete', 'Copy', 'Paste' ,'Disable', 'Enable']
+        actions = ['Delete', 'Copy', 'Paste', 'Disable', 'Enable']
         for item in actions:
             action = menu.addAction(item)
-            action.triggered[()].connect(lambda item=item: self.manageImagePlanes(item))
+            action.triggered[()].connect(lambda item=item: self.manageAovContextMenu(item))
         
         menu.exec_(QtGui.QCursor.pos())
 
@@ -343,17 +352,16 @@ class AovManager(QtGui.QMainWindow):
             # be used in various areas like copying, resetting etc.
             self.ipData.append(self.buildImagePlaneData(i))
 
-
         self.aovList.setModel(self.model)
 
 
 
 
     '''
-        Delete image plane by name.
-        eg: self.deleteImagePlaneByName('all_comp')
+        Enable, Disable or Delete image plane by name.
+        eg: self.wrangleImagePlanes('all_comp', 'delete')
     '''
-    def deleteImagePlaneByName(self,name):
+    def wrangleImagePlanes(self, name, option):
         node    = self.currRop
         p       = node.parm('vm_numaux') 
         ipCount = node.parm('vm_numaux').eval()
@@ -362,23 +370,31 @@ class AovManager(QtGui.QMainWindow):
             ipName = node.parm('vm_variable_plane%d' % i).eval()
 
             if(ipName==name):
-                print 'DELETING IMAGE PLANE', ipName, name
-                p.removeMultiParmInstance(i-1)
-                break
-
-
+                if(option=='delete'):
+                    print 'Deleting image plane', ipName, name
+                    p.removeMultiParmInstance(i-1)
+                    break
+                elif(option=='enable'):
+                    print 'Disabling image plane', ipName, name
+                    node.parm('vm_disable_plane%d' % i).set(0)
+                    break
+                elif(option=='disable'):
+                    print 'Disabling image plane', ipName, name
+                    node.parm('vm_disable_plane%d' % i).set(1)
+                    break
+                
 
 
     '''
         Manage right click options
     '''
-    def manageImagePlanes(self, action):
+    def manageAovContextMenu(self, action):
         
         items =  self.getSelectedItems()
         
         if(action=='Delete'):
             for item in items:
-                self.deleteImagePlaneByName(item)
+                self.wrangleImagePlanes(item,'delete')
 
 
         elif(action=='Copy'):
@@ -389,8 +405,18 @@ class AovManager(QtGui.QMainWindow):
         elif(action=='Paste'):
             self.pasteImagePlanes()
 
+        elif(action=='Enable'):
+            for item in items:
+                self.wrangleImagePlanes(item,'enable')
+
+        elif(action=='Disable'):
+            for item in items:
+                self.wrangleImagePlanes(item,'disable')
+
         # update treeView
         self.populateAovTree()
+
+
 
 
     '''
@@ -412,7 +438,9 @@ class AovManager(QtGui.QMainWindow):
 
         #print 'COPIED PLANES\n',self.copiedImagePlanes
 
-        
+
+
+      
     '''
         Create new image planes on current rop and
         set their parm values to match the copied data
@@ -450,6 +478,7 @@ class AovManager(QtGui.QMainWindow):
         '''
 
 
+
     '''
         get text from first column of selected items in the tree
     '''
@@ -467,6 +496,7 @@ class AovManager(QtGui.QMainWindow):
             itemList.append(self.model.itemFromIndex(ind).text())
 
         return itemList
+
 
 
 
@@ -521,6 +551,7 @@ class AovManager(QtGui.QMainWindow):
 
 
 
+
     '''
         Get selected rop in list on single click.
     '''
@@ -529,30 +560,37 @@ class AovManager(QtGui.QMainWindow):
         self.currRop = cRop
         self.populateAovTree()
         
-
         ps           = cRop.parmTuple('vm_samples').eval()
         pixelSamples = str(ps[0]) + 'x' + str(ps[1])
         noiseLevel   = cRop.parm('vm_variance').eval()
         take         = cRop.parm('take').eval()
-
+        
+        self.updateDispStatus()
         self.statusBar.showMessage('take: ' + take + '  |  pixel samples: ' + pixelSamples + '  |  noise level: ' + str(noiseLevel)   )
 
 
 
-    # def populateAovList(self):
-    #     node = self.currRop
 
-    #     # get image plane count
-    #     parmCount = node.parm('vm_numaux').eval()
-
-    #     self.aovList.clear()
-    #     # loop through them to access desired parms
-    #     for i in xrange(1, parmCount+1):
-    #        vexvar = node.parm('vm_variable_plane%d' % i)
-    #        chname = node.parm('vm_channel_plane%d' % i)
-
-    #        listItem =  str(vexvar.eval() + '\t' + chname.eval())
-    #        self.aovList.addItem(listItem)
+    '''
+        Update displacement check box state depending on
+        whether dicing parm exists and is disabled or enabled.
+    '''
+    def updateDispStatus(self):
+        disp         = self.currRop.parm('vm_dicingquality')
+        if(disp):
+            disp = disp.eval()
+            if disp == 1:
+                self.tglDispChkBx.setChecked(True)
+                self.tglDispChkBx.setText("Displacements ON")
+                self.ropDisp = True
+            else:
+                self.tglDispChkBx.setChecked(False)
+                self.tglDispChkBx.setText("Displacements OFF")
+                self.ropDisp = False
+        else:
+            self.tglDispChkBx.setChecked(True)
+            self.tglDispChkBx.setText("Displacements ON")
+            self.ropDisp = True
 
 
 
@@ -561,6 +599,7 @@ def loadUi(uifile, baseinstance=None):
     widget = loader.load(uifile)
     QMetaObject.connectSlotsByName(widget)
     return widget
+
 
 
 def main():
